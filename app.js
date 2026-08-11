@@ -79,11 +79,40 @@ function sanitizeProjects(value) {
 function loadProjects() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? sanitizeProjects(JSON.parse(stored)) : cloneInitialProjects();
+    if (!stored) return cloneInitialProjects();
+    let projects = sanitizeProjects(JSON.parse(stored));
+    const migrated = migrateProjects(projects);
+    if (migrated !== projects) {
+      projects = migrated;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+    }
+    return projects;
   } catch (error) {
     console.warn("无法读取已保存的数据，已恢复初始项目。", error);
     return cloneInitialProjects();
   }
+}
+
+function migrateProjects(projects) {
+  let changed = false;
+
+  const kept = projects.filter((project) => {
+    if (project.name === "badminton-scoring") {
+      changed = true;
+      return false;
+    }
+    return true;
+  });
+
+  const oldIndex = kept.findIndex((project) => project.name === "badminton-level");
+  if (oldIndex !== -1) {
+    changed = true;
+    return kept.map((project, index) =>
+      index === oldIndex ? { ...project, id: "badminton", name: "badminton" } : project,
+    );
+  }
+
+  return changed ? kept : projects;
 }
 
 function saveProjects() {

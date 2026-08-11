@@ -2,7 +2,6 @@ const STORAGE_KEY = "choi975-project-index-v1";
 
 const INITIAL_PROJECTS = [
   { id: "badminton-level", name: "badminton-level", cloudflare: true, github: true },
-  { id: "badminton-scoring", name: "badminton-scoring", cloudflare: false, github: true },
   { id: "sien-day", name: "sien-day", cloudflare: true, github: true },
   { id: "todo", name: "todo", cloudflare: true, github: true },
   { id: "wenti", name: "wenti", cloudflare: true, github: true },

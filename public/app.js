@@ -412,7 +412,7 @@ elements.importFile.addEventListener("change", () => {
   if (file) importProjects(file);
 });
 elements.resetButton.addEventListener("click", () => {
-  const confirmed = window.confirm("确定恢复为最初的 6 个项目吗？当前浏览器中的修改将被覆盖。");
+  const confirmed = window.confirm("确定恢复为最初的 5 个项目吗？当前设备中的修改将被覆盖。");
   if (!confirmed) return;
   projects = cloneInitialProjects();
   saveProjects();

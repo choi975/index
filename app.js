@@ -1,4 +1,12 @@
 const STORAGE_KEY = "choi975-project-index-v1";
+const API_BASE = location.hostname === "index.choi975.workers.dev" ? "" : "https://index.choi975.workers.dev";
+const SHORTCUT_URLS = {
+  1: "https://todo.choi975.workers.dev/",
+  2: "https://badminton.choi975.workers.dev/",
+  3: "https://wenti.choi975.workers.dev/",
+  4: "https://sien-day.choi975.workers.dev/",
+  5: "https://choi975.github.io/xizang/",
+};
 
 const INITIAL_PROJECTS = [
   { id: "badminton", name: "badminton", cloudflare: true, github: true },
@@ -22,11 +30,14 @@ const elements = {
   projectCount: document.querySelector("#project-count"),
   linkCount: document.querySelector("#link-count"),
   toast: document.querySelector("#toast"),
+  syncStatus: document.querySelector("#sync-status"),
 };
 
 let projects = loadProjects();
 let editing = false;
 let toastTimer;
+let remoteSaveTimer;
+let localChangesPending = false;
 
 function cloneInitialProjects() {
   return INITIAL_PROJECTS.map((project) => ({ ...project }));
@@ -118,6 +129,54 @@ function migrateProjects(projects) {
 function saveProjects() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
   updateStats();
+  localChangesPending = true;
+  queueRemoteSave();
+}
+
+function setSyncStatus(message, state = "") {
+  elements.syncStatus.textContent = message;
+  elements.syncStatus.dataset.state = state;
+}
+
+function queueRemoteSave() {
+  window.clearTimeout(remoteSaveTimer);
+  remoteSaveTimer = window.setTimeout(async () => {
+    const snapshot = JSON.stringify(projects);
+    try {
+      const response = await fetch(`${API_BASE}/api/projects`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: snapshot,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (snapshot === JSON.stringify(projects)) localChangesPending = false;
+      setSyncStatus("已同步到云端", "success");
+    } catch (error) {
+      console.warn("云端保存失败", error);
+      setSyncStatus("云端暂不可用，已保存在本机", "error");
+    }
+  }, 350);
+}
+
+async function syncFromCloud() {
+  try {
+    const response = await fetch(`${API_BASE}/api/projects`, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const remoteProjects = sanitizeProjects(payload.projects);
+    if (localChangesPending) {
+      queueRemoteSave();
+      setSyncStatus("本机改动待同步", "error");
+      return;
+    }
+    projects = remoteProjects;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+    render();
+    setSyncStatus("已连接云端数据", "success");
+  } catch (error) {
+    console.warn("云端读取失败，继续使用本机数据", error);
+    setSyncStatus("云端暂不可用，使用本机数据", "error");
+  }
 }
 
 function updateStats() {
@@ -366,6 +425,18 @@ document.addEventListener("keydown", (event) => {
   const activeTag = document.activeElement?.tagName;
   const isTyping = activeTag === "INPUT" || activeTag === "TEXTAREA";
 
+  if (event.altKey && !event.ctrlKey && !event.metaKey && SHORTCUT_URLS[event.key] && !isTyping) {
+    event.preventDefault();
+    window.location.href = SHORTCUT_URLS[event.key];
+    return;
+  }
+
+  if (event.ctrlKey && event.altKey && !event.metaKey && SHORTCUT_URLS[event.key] && !isTyping) {
+    event.preventDefault();
+    window.open(SHORTCUT_URLS[event.key], "_blank", "noopener,noreferrer");
+    return;
+  }
+
   if (event.key === "/" && !isTyping) {
     event.preventDefault();
     elements.search.focus();
@@ -379,3 +450,4 @@ document.addEventListener("keydown", (event) => {
 });
 
 render();
+syncFromCloud();

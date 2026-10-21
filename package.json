@@ -1,0 +1,9 @@
+{
+  "name": "project-index",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/sync-public.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

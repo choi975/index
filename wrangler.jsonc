@@ -5,13 +5,17 @@
   "compatibility_date": "2026-08-30",
   "assets": {
     "directory": "public",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": [
+      "/api/*"
+    ],
+    "binding": "ASSETS"
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "index",
-      "database_id": "97c32643-685a-452a-8b7d-946386a26c6a"
+      "database_id": "97c32643-685a-452a-8b7d-946386a26c6a",
+      "migrations_dir": "migrations"
     }
   ]
 }

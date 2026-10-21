@@ -273,7 +273,7 @@ h1 span {
 .table-head,
 .project-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1.5fr) minmax(190px, 1fr) minmax(190px, 1fr);
+  grid-template-columns: 56px minmax(210px, 1.3fr) minmax(145px, 1fr) minmax(145px, 1fr) 112px 140px;
   align-items: center;
 }
 
@@ -824,4 +824,36 @@ h1 span {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Shortcut settings extend the existing project table without coupling order to keys. */
+.shortcut-guide { margin: 0 24px 18px; color: var(--muted); font-size: .85rem; line-height: 1.8; }
+.shortcut-guide strong { color: var(--ink); font-weight: 600; }
+.order-cell { color: var(--muted); font-variant-numeric: tabular-nums; }
+.order-actions { display: none; gap: 3px; margin-top: 6px; }
+.order-actions button { width: 24px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-solid); color: var(--ink); cursor: pointer; }
+.shortcut-display { font: 600 .8rem/1.5 ui-monospace, monospace; color: var(--accent-dark); }
+.shortcut-lock { display: block; font-size: .68rem; color: var(--muted); }
+.shortcut-target-display { font-size: .82rem; }
+.edit-control { display: none; width: calc(100% - 8px); max-width: 136px; min-height: 36px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface-solid); font: inherit; font-size: .8rem; }
+.editing .edit-control { display: block; }
+.editing .order-actions { display: flex; }
+.editing .shortcut-display, .editing .shortcut-target-display { display: none; }
+button:disabled, select:disabled, input:disabled { cursor: not-allowed; opacity: .6; }
+select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+@media (max-width: 1000px) and (min-width: 761px) {
+  .table-head, .project-row { grid-template-columns: 48px minmax(170px, 1.2fr) minmax(108px, 1fr) minmax(108px, 1fr) 92px 110px; }
+  .project-monogram { display: none; }
+  .table-head { font-size: .65rem; }
+  .shell { width: calc(100% - 24px); }
+}
+@media (max-width: 760px) {
+  .shortcut-guide { margin: 0 18px 14px; }
+  .order-cell { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 0; }
+  .order-cell::before { content: "排序"; font-size: .75rem; }
+  .order-actions { margin-top: 0; }
+  .shortcut-cell, .target-cell { border-top: 1px solid var(--line); margin-top: 8px; }
+  .shortcut-cell::before, .target-cell::before { content: attr(data-label); display: block; margin-bottom: 8px; font-size: .7rem; color: var(--muted); }
+  .edit-control { max-width: none; }
 }

@@ -6,6 +6,7 @@
     <meta name="description" content="集中管理并快速打开 Cloudflare Workers 与 GitHub Pages 项目。" />
     <meta name="theme-color" content="#f5f3ee" />
     <title>项目索引 · Project Index</title>
+    <script src="project-shortcuts.js?v=2"></script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -17,7 +18,7 @@
         <div>
           <p class="eyebrow">CHOI975 · PERSONAL LAUNCHPAD</p>
           <h1>项目索引</h1>
-          <p class="subtitle">把散落在不同平台的作品，收进一个随时可达的入口。</p>
+          <p class="subtitle">管理项目入口与全局快捷键；一次设置，所有项目同步使用。</p>
         </div>
 
         <div class="hero-stats" aria-label="项目统计">
@@ -53,10 +54,12 @@
           </div>
         </div>
 
+        <p class="shortcut-guide"><strong>0 = index · 1 = todo · 2 = badminton · 3 = sien-day</strong><br>0～3 固定跳转 Cloudflare；4～9 由你分配，删除后保留空位。Alt 在当前页打开，Ctrl+Alt 新建标签页。排序只影响列表，不改变快捷键。</p>
         <h2 class="sr-only" id="workspace-title">项目列表</h2>
 
         <div class="project-table" role="table" aria-label="项目链接">
           <div class="table-head" role="row">
+            <div role="columnheader">排序</div>
             <div role="columnheader">项目</div>
             <div role="columnheader">
               <span class="brand-dot cloudflare-dot"></span>
@@ -66,6 +69,8 @@
               <span class="brand-dot github-dot"></span>
               GitHub Pages
             </div>
+            <div role="columnheader">快捷键</div>
+            <div role="columnheader">跳转平台</div>
           </div>
           <div id="project-list" class="table-body" role="rowgroup"></div>
         </div>
@@ -79,6 +84,7 @@
         <footer class="workspace-footer">
           <p><span class="status-dot"></span><span id="sync-status">正在连接云端数据</span></p>
           <div class="data-actions">
+            <button id="retry-sync" type="button">重新同步</button>
             <button id="import-button" type="button">导入 JSON</button>
             <button id="export-button" type="button">导出 JSON</button>
             <button id="reset-button" type="button">恢复初始项目</button>
@@ -94,6 +100,7 @@
 
     <template id="project-row-template">
       <div class="project-row" role="row">
+        <div class="project-cell order-cell" role="cell" data-label="排序"><span class="row-number"></span><div class="order-actions"><button class="move-up" type="button" title="上移">↑</button><button class="move-down" type="button" title="下移">↓</button></div></div>
         <div class="project-cell project-identity" role="cell" data-label="项目">
           <div class="project-monogram" aria-hidden="true"></div>
           <div class="project-main">
@@ -139,9 +146,17 @@
             <span>已部署</span>
           </label>
         </div>
+        <div class="project-cell shortcut-cell" role="cell" data-label="快捷键">
+          <span class="shortcut-display"></span><span class="shortcut-lock" title="固定快捷键">固定</span>
+          <select class="shortcut-number edit-control"><option value="">未分配</option><option value="0">Alt+0</option><option value="1">Alt+1</option><option value="2">Alt+2</option><option value="3">Alt+3</option><option value="4">Alt+4</option><option value="5">Alt+5</option><option value="6">Alt+6</option><option value="7">Alt+7</option><option value="8">Alt+8</option><option value="9">Alt+9</option></select>
+        </div>
+        <div class="project-cell target-cell" role="cell" data-label="跳转平台">
+          <span class="shortcut-target-display"></span>
+          <select class="shortcut-platform edit-control"><option value="cloudflare">Cloudflare</option><option value="github">GitHub Pages</option></select>
+        </div>
       </div>
     </template>
 
-    <script src="app.js" defer></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

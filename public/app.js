@@ -1,20 +1,7 @@
-const STORAGE_KEY = "choi975-project-index-v1";
+import { DEFAULT_PROJECTS, FIXED_PROJECTS, normalizeProjects, isFixed } from "./project-config.js";
+const STORAGE_KEY = "choi975-project-index-v2";
 const API_BASE = location.hostname === "index.choi975.workers.dev" ? "" : "https://index.choi975.workers.dev";
-const SHORTCUT_URLS = {
-  1: "https://todo.choi975.workers.dev/",
-  2: "https://badminton.choi975.workers.dev/",
-  3: "https://wenti.choi975.workers.dev/",
-  4: "https://sien-day.choi975.workers.dev/",
-  5: "https://choi975.github.io/xizang/",
-};
-
-const INITIAL_PROJECTS = [
-  { id: "badminton", name: "badminton", cloudflare: true, github: true },
-  { id: "sien-day", name: "sien-day", cloudflare: true, github: true },
-  { id: "todo", name: "todo", cloudflare: true, github: true },
-  { id: "wenti", name: "wenti", cloudflare: true, github: true },
-  { id: "xizang", name: "xizang", cloudflare: false, github: true },
-];
+const INITIAL_PROJECTS = DEFAULT_PROJECTS;
 
 const elements = {
   list: document.querySelector("#project-list"),
@@ -31,13 +18,17 @@ const elements = {
   linkCount: document.querySelector("#link-count"),
   toast: document.querySelector("#toast"),
   syncStatus: document.querySelector("#sync-status"),
+  retrySync: document.querySelector("#retry-sync"),
 };
 
+let cloudRevision = null;
+let localChangesPending = false;
+let saving = false;
+let saveConflict = false;
 let projects = loadProjects();
 let editing = false;
 let toastTimer;
 let remoteSaveTimer;
-let localChangesPending = false;
 
 function cloneInitialProjects() {
   return INITIAL_PROJECTS.map((project) => ({ ...project }));
@@ -69,114 +60,99 @@ function githubRepoUrl(name) {
 }
 
 function sanitizeProjects(value) {
-  if (!Array.isArray(value)) throw new Error("JSON 顶层必须是项目数组");
-
-  const seen = new Set();
-  return value.map((item, index) => {
-    const name = normalizeName(item?.name);
-    if (!isValidName(name)) throw new Error(`第 ${index + 1} 个项目名称无效`);
-    if (seen.has(name)) throw new Error(`项目名称重复：${name}`);
-    seen.add(name);
-
-    return {
-      id: typeof item.id === "string" && item.id ? item.id : makeId(),
-      name,
-      cloudflare: Boolean(item.cloudflare),
-      github: Boolean(item.github),
-    };
-  });
+  return normalizeProjects(value, { legacy: Array.isArray(value) && value.every((project) => project.shortcutNumber === undefined) });
 }
-
+function persistLocal() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects, revision: cloudRevision, pending: localChangesPending })); }
+  catch { setSyncStatus("本机存储不可用，请保持页面打开直到云端保存成功", "error"); }
+}
 function loadProjects() {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return cloneInitialProjects();
-    let projects = sanitizeProjects(JSON.parse(stored));
-    const migrated = migrateProjects(projects);
-    if (migrated !== projects) {
-      projects = migrated;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (stored) {
+      const projects = sanitizeProjects(stored.projects);
+      cloudRevision = typeof stored.revision === "string" ? stored.revision : null;
+      localChangesPending = Boolean(stored.pending);
+      return projects;
     }
-    return projects;
-  } catch (error) {
-    console.warn("无法读取已保存的数据，已恢复初始项目。", error);
-    return cloneInitialProjects();
-  }
+    const legacy = localStorage.getItem("choi975-project-index-v1");
+    if (legacy) return sanitizeProjects(JSON.parse(legacy));
+  } catch (error) { console.warn("本机配置读取失败", error); }
+  return cloneInitialProjects();
 }
-
-function migrateProjects(projects) {
-  let changed = false;
-
-  const kept = projects.filter((project) => {
-    if (project.name === "badminton-scoring") {
-      changed = true;
-      return false;
-    }
-    return true;
-  });
-
-  const oldIndex = kept.findIndex((project) => project.name === "badminton-level");
-  if (oldIndex !== -1) {
-    changed = true;
-    return kept.map((project, index) =>
-      index === oldIndex ? { ...project, id: "badminton", name: "badminton" } : project,
-    );
-  }
-
-  return changed ? kept : projects;
-}
-
 function saveProjects() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
-  updateStats();
+  normalizeProjects(projects);
   localChangesPending = true;
+  persistLocal();
+  updateStats();
+  setSyncStatus("改动已保存在本机，正在同步…");
   queueRemoteSave();
 }
-
 function setSyncStatus(message, state = "") {
   elements.syncStatus.textContent = message;
   elements.syncStatus.dataset.state = state;
 }
-
 function queueRemoteSave() {
   window.clearTimeout(remoteSaveTimer);
-  remoteSaveTimer = window.setTimeout(async () => {
-    const snapshot = JSON.stringify(projects);
-    try {
-      const response = await fetch(`${API_BASE}/api/projects`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: snapshot,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      if (snapshot === JSON.stringify(projects)) localChangesPending = false;
-      setSyncStatus("已同步到云端", "success");
-    } catch (error) {
-      console.warn("云端保存失败", error);
-      setSyncStatus("云端暂不可用，已保存在本机", "error");
-    }
-  }, 350);
+  if (saveConflict || saving || !localChangesPending) return;
+  remoteSaveTimer = window.setTimeout(saveToCloud, 350);
 }
-
-async function syncFromCloud() {
+async function saveToCloud() {
+  if (saving || saveConflict || !localChangesPending) return;
+  normalizeProjects(projects);
+  if (!cloudRevision) { setSyncStatus("尚未读取云端版本，点击重新同步后保存", "error"); return; }
+  saving = true;
+  const snapshot = JSON.stringify(projects);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`${API_BASE}/api/projects`, { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const response = await fetch(API_BASE + "/api/projects", {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projects: JSON.parse(snapshot), revision: cloudRevision }), signal: controller.signal,
+    });
+    const payload = await response.json();
+    if (response.status === 409) { saveConflict = true; throw new Error(payload.error); }
+    if (!response.ok) throw new Error(payload.error || "HTTP " + response.status);
+    if (typeof payload.revision !== "string") throw new Error("云端版本无效");
+    cloudRevision = payload.revision;
+    localChangesPending = snapshot !== JSON.stringify(projects);
+    persistLocal();
+    setSyncStatus(localChangesPending ? "继续同步最新修改…" : "已同步到云端", localChangesPending ? "" : "success");
+  } catch (error) {
+    console.warn("云端保存失败", error);
+    setSyncStatus(saveConflict ? "保存冲突：请先导出本机修改，再点重新同步" : "保存失败，改动仍在本机；点击重新同步重试", "error");
+  } finally {
+    clearTimeout(timer);
+    saving = false;
+    if (localChangesPending && !saveConflict && snapshot !== JSON.stringify(projects)) queueRemoteSave();
+  }
+}
+async function syncFromCloud() {
+  if (saving || saveConflict) return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(API_BASE + "/api/projects", { cache: "no-store", headers: { accept: "application/json" }, signal: controller.signal });
+    if (!response.ok) throw new Error("HTTP " + response.status);
     const payload = await response.json();
     const remoteProjects = sanitizeProjects(payload.projects);
+    if (typeof payload.revision !== "string" || !payload.revision) throw new Error("请等待新版云端配置服务部署完成");
     if (localChangesPending) {
-      queueRemoteSave();
-      setSyncStatus("本机改动待同步", "error");
+      if (cloudRevision !== payload.revision) {
+        saveConflict = true;
+        setSyncStatus("云端已有新配置，请导出本机修改后重新同步", "error");
+      } else queueRemoteSave();
       return;
     }
     projects = remoteProjects;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+    cloudRevision = payload.revision;
+    persistLocal();
     render();
     setSyncStatus("已连接云端数据", "success");
   } catch (error) {
-    console.warn("云端读取失败，继续使用本机数据", error);
-    setSyncStatus("云端暂不可用，使用本机数据", "error");
-  }
+    console.warn("云端读取失败", error);
+    setSyncStatus("云端暂不可用，使用本机配置；可点击重新同步", "error");
+  } finally { clearTimeout(timer); }
 }
 
 function updateStats() {
@@ -239,6 +215,10 @@ function updateProjectName(project, input, errorElement) {
 
   input.classList.remove("invalid");
   errorElement.textContent = "";
+  if (Object.hasOwn(FIXED_PROJECTS, name) && !isFixed(project)) {
+    errorElement.textContent = "这个名称属于固定项目";
+    return false;
+  }
   project.name = name;
   saveProjects();
   return true;
@@ -272,6 +252,48 @@ function createProjectRow(project) {
   }
   slug.textContent = project.name;
   input.value = project.name;
+  const fixed = isFixed(project);
+  input.disabled = fixed;
+  deleteButton.disabled = fixed;
+  deleteButton.title = fixed ? "固定项目不能删除" : "删除项目";
+  cloudflareToggle.disabled = fixed;
+  row.classList.toggle("fixed-project", fixed);
+  fragment.querySelector(".row-number").textContent = project.sortOrder + 1;
+  const numberSelect = fragment.querySelector(".shortcut-number");
+  const platformSelect = fragment.querySelector(".shortcut-platform");
+  numberSelect.value = project.shortcutNumber === null ? "" : String(project.shortcutNumber);
+  numberSelect.disabled = fixed;
+  if (!fixed) for (const option of numberSelect.options) if (option.value !== "" && Number(option.value) < 4) option.disabled = true;
+  numberSelect.setAttribute("aria-label", project.name + "的快捷键编号");
+  platformSelect.value = project.shortcutPlatform;
+  platformSelect.disabled = fixed;
+  platformSelect.setAttribute("aria-label", project.name + "的快捷键目标平台");
+  platformSelect.querySelector('[value="cloudflare"]').disabled = !project.cloudflare;
+  platformSelect.querySelector('[value="github"]').disabled = !project.github;
+  fragment.querySelector(".shortcut-lock").hidden = !fixed;
+  fragment.querySelector(".shortcut-display").textContent = project.shortcutNumber === null ? "未分配" : "Alt+" + project.shortcutNumber;
+  fragment.querySelector(".shortcut-target-display").textContent = project.shortcutPlatform === "github" ? "GitHub Pages" : "Cloudflare";
+  numberSelect.addEventListener("change", () => {
+    const number = numberSelect.value === "" ? null : Number(numberSelect.value);
+    const duplicate = projects.find((item) => item.id !== project.id && item.shortcutNumber === number && number !== null);
+    if (duplicate) { showToast("编号 " + number + " 已分配给 " + duplicate.name + "，请先释放它的编号"); numberSelect.value = project.shortcutNumber === null ? "" : project.shortcutNumber; return; }
+    if (number !== null && !project[project.shortcutPlatform]) { showToast("请先启用快捷键目标平台"); numberSelect.value = project.shortcutNumber === null ? "" : project.shortcutNumber; return; }
+    project.shortcutNumber = number;
+    saveProjects(); render();
+  });
+  platformSelect.addEventListener("change", () => { project.shortcutPlatform = platformSelect.value; saveProjects(); render(); });
+  const move = (offset) => {
+    const index = projects.findIndex((item) => item.id === project.id);
+    const other = index + offset;
+    if (other < 0 || other >= projects.length) return;
+    [projects[index], projects[other]] = [projects[other], projects[index]];
+    projects.forEach((item, index) => { item.sortOrder = index; });
+    saveProjects(); render();
+  };
+  const up = fragment.querySelector(".move-up"); const down = fragment.querySelector(".move-down");
+  up.disabled = project.sortOrder === 0; down.disabled = project.sortOrder === projects.length - 1;
+  up.setAttribute("aria-label", "上移 " + project.name); down.setAttribute("aria-label", "下移 " + project.name);
+  up.addEventListener("click", () => move(-1)); down.addEventListener("click", () => move(1));
 
   cloudflareLink.href = cloudflareUrl(project.name);
   cloudflareLink.hidden = !project.cloudflare;
@@ -305,19 +327,30 @@ function createProjectRow(project) {
   });
 
   cloudflareToggle.addEventListener("change", () => {
+    if (fixed) return;
     project.cloudflare = cloudflareToggle.checked;
-    saveProjects();
+    if (!project.cloudflare && project.shortcutPlatform === "cloudflare") {
+      if (project.github) project.shortcutPlatform = "github";
+      else project.shortcutNumber = null;
+    }
+    saveProjects(); render();
   });
 
   githubToggle.addEventListener("change", () => {
     project.github = githubToggle.checked;
-    saveProjects();
+    if (!project.github && project.shortcutPlatform === "github") {
+      project.shortcutPlatform = "cloudflare";
+      if (!project.cloudflare) project.shortcutNumber = null;
+    }
+    saveProjects(); render();
   });
 
   deleteButton.addEventListener("click", () => {
+    if (fixed) return;
     const confirmed = window.confirm(`确定删除“${project.name || "未命名项目"}”吗？`);
     if (!confirmed) return;
     projects = projects.filter((candidate) => candidate.id !== project.id);
+    projects.forEach((item, index) => { item.sortOrder = index; });
     saveProjects();
     render();
     showToast("项目已删除");
@@ -339,8 +372,11 @@ function addProject() {
   const project = {
     id: makeId(),
     name: `new-project-${projects.length + 1}`,
-    cloudflare: false,
+    cloudflare: true,
     github: false,
+    shortcutNumber: null,
+    shortcutPlatform: "cloudflare",
+    sortOrder: projects.length,
   };
 
   projects.push(project);
@@ -412,7 +448,7 @@ elements.importFile.addEventListener("change", () => {
   if (file) importProjects(file);
 });
 elements.resetButton.addEventListener("click", () => {
-  const confirmed = window.confirm("确定恢复为最初的 5 个项目吗？当前设备中的修改将被覆盖。");
+  const confirmed = window.confirm("确定恢复默认 6 个项目及快捷键配置吗？现有设置将被覆盖，其他网站下一次成功查询后会采用默认配置。");
   if (!confirmed) return;
   projects = cloneInitialProjects();
   saveProjects();
@@ -424,18 +460,6 @@ elements.resetButton.addEventListener("click", () => {
 document.addEventListener("keydown", (event) => {
   const activeTag = document.activeElement?.tagName;
   const isTyping = activeTag === "INPUT" || activeTag === "TEXTAREA";
-
-  if (event.altKey && !event.ctrlKey && !event.metaKey && SHORTCUT_URLS[event.key] && !isTyping) {
-    event.preventDefault();
-    window.location.href = SHORTCUT_URLS[event.key];
-    return;
-  }
-
-  if (event.ctrlKey && event.altKey && !event.metaKey && SHORTCUT_URLS[event.key] && !isTyping) {
-    event.preventDefault();
-    window.open(SHORTCUT_URLS[event.key], "_blank", "noopener,noreferrer");
-    return;
-  }
 
   if (event.key === "/" && !isTyping) {
     event.preventDefault();
@@ -449,5 +473,15 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+elements.retrySync.addEventListener("click", async () => {
+  if (saveConflict) {
+    if (!window.confirm("请先导出本机修改。继续将丢弃本机待同步改动，读取最新云端配置。")) return;
+    localChangesPending = false; saveConflict = false; persistLocal();
+  }
+  if (localChangesPending && cloudRevision) await saveToCloud();
+  else await syncFromCloud();
+});
+window.addEventListener("online", () => { if (localChangesPending) queueRemoteSave(); else void syncFromCloud(); });
+window.addEventListener("beforeunload", (event) => { if (localChangesPending) { event.preventDefault(); event.returnValue = ""; } });
 render();
 syncFromCloud();

@@ -3,3 +3,6 @@ Thumbs.db
 .idea/
 .vscode/
 .wrangler/
+
+output/
+.playwright-cli/
